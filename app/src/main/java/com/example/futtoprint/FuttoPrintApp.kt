@@ -28,31 +28,34 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.futtoprint.post.Post
+import com.example.futtoprint.post.PostRepository
 import com.example.futtoprint.util.toDateTime
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FuttoPrintApp() {
+fun FuttoPrintApp(postRepository: PostRepository) {
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
-    val posts = remember { mutableStateListOf<Post>() }
+    val scrollToTop = remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -67,16 +70,35 @@ fun FuttoPrintApp() {
         },
         bottomBar = {
             PostForm(postMessage = {
-                posts.add(Post(id = posts.size, content = it, timestamp = System.currentTimeMillis()))
+                coroutineScope.launch {
+                    postRepository.insert(it)
+                    scrollToTop.value = true
+                }
             }, modifier = Modifier.padding(20.dp))
         },
-        modifier = Modifier.fillMaxSize().padding(bottom = 40.dp),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .padding(bottom = 40.dp),
     ) { innerPadding ->
+        // FIXME render scrollToTop to run recomposition
+        Text(
+            text = scrollToTop.value.toString(),
+            modifier = Modifier.size(0.dp).alpha(0f),
+        )
+
         PostFeed(
             coroutineScope = coroutineScope,
             listState = listState,
-            posts = posts,
-            modifier = Modifier.padding(innerPadding).padding(10.dp),
+            scrollToTop = scrollToTop,
+            posts =
+                runBlocking {
+                    postRepository.selectAll().first()
+                },
+            modifier =
+                Modifier
+                    .padding(innerPadding)
+                    .padding(10.dp),
         )
     }
 }
@@ -85,6 +107,7 @@ fun FuttoPrintApp() {
 fun PostFeed(
     coroutineScope: CoroutineScope,
     listState: LazyListState,
+    scrollToTop: MutableState<Boolean>,
     posts: List<Post>,
     modifier: Modifier = Modifier,
 ) {
@@ -95,12 +118,14 @@ fun PostFeed(
                 alignment = Alignment.Bottom,
             ),
         state = listState,
+        reverseLayout = true,
         modifier = modifier.fillMaxSize(),
     ) {
-        coroutineScope.launch {
-            listState.animateScrollToItem(
-                index = max(posts.size - 1, 0)
-            )
+        if (scrollToTop.value) {
+            coroutineScope.launch {
+                listState.animateScrollToItem(index = 0)
+            }
+            scrollToTop.value = false
         }
 
         items(
@@ -155,7 +180,10 @@ fun PostForm(
                     Icon(imageVector = Icons.Rounded.Send, contentDescription = null, Modifier.size(ButtonDefaults.IconSize))
                 }
             },
-            modifier = Modifier.fillMaxWidth().height(80.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(80.dp),
         )
     }
 }
